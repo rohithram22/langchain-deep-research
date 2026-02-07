@@ -25,9 +25,9 @@ class AgentConfig:
     tavily_api_key: Optional[str] = None
 
 
-# ============================================================
+
 # PROMPTS
-# ============================================================
+
 
 GENERATE_QUERY_PROMPT = """You are a research assistant helping to gather information on a topic.
 

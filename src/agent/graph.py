@@ -1,23 +1,21 @@
 """
 LangGraph definition for the Deep Research Agent.
 
-Graph Structure (Local Deep Researcher pattern):
+Graph Structure:
 
-    START
-      │
-      ▼
-    initialize ──► generate_query ──► search ──► summarize ──► reflect
-                        ▲                                        │
-                        │                                        │
-                        └────────── CONTINUE ────────────────────┤
-                                                                 │
-                                                           SUFFICIENT
-                                                                 │
-                                                                 ▼
-                                                           write_report
-                                                                 │
-                                                                 ▼
-                                                                END
+1. Start with a research topic
+2. Generate search queries based on current knowledge
+3. Search the web for relevant sources
+4. Summarize and add findings to running summary
+5. Reflect: Do we have enough info?
+   - If NO (CONTINUE) -> go back to step 2
+   - If YES (SUFFICIENT) -> go to step 6
+6. Write the final research report
+7. Done
+
+The key insight: each iteration builds on the previous summary, so queries become more targeted and we avoid duplicate research.
+
+
 """
 
 from langgraph.graph import StateGraph, START, END

@@ -2,11 +2,12 @@
 Node functions for the Deep Research Agent.
 
 Each function represents a step in the research process:
-1. generate_query - Create search query based on current knowledge
-2. search - Execute web search
-3. summarize - Update running summary with new findings
-4. reflect - Decide whether to continue or stop
-5. write_report - Generate final report
+1. initialize_state - Set up initial state from user query
+2. generate_query - Create search query based on current knowledge
+3. search - Execute web search
+4. summarize - Update running summary with new findings
+5. reflect - Decide whether to continue or stop
+6. write_report - Generate final report
 """
 
 import os
@@ -95,6 +96,9 @@ def generate_query(state: ResearchState) -> dict:
     response = llm.invoke(prompt)
     query = response.content.strip()
     
+    # Clean up the query (remove quotes if present)
+    query = query.strip('"\'')
+    
     return {"current_query": query}
 
 
@@ -125,18 +129,24 @@ def search(state: ResearchState) -> dict:
         
         # Add to existing sources (avoid duplicates by URL)
         existing_urls = {s["url"] for s in state.get("sources", [])}
-        existing_sources = state.get("sources", [])
+        existing_sources = list(state.get("sources", []))
         
         for source in new_sources:
             if source["url"] not in existing_urls:
                 existing_sources.append(source)
                 existing_urls.add(source["url"])
         
-        return {"sources": existing_sources, "_search_results": new_sources}
+        return {
+            "sources": existing_sources,
+            "_search_results": new_sources  # Temporary, for summarize node
+        }
         
     except Exception as e:
         print(f"Search error: {e}")
-        return {"sources": state.get("sources", []), "_search_results": []}
+        return {
+            "sources": state.get("sources", []),
+            "_search_results": []
+        }
 
 
 def summarize(state: ResearchState) -> dict:
@@ -179,11 +189,9 @@ def reflect(state: ResearchState) -> dict:
     """
     Reflect on current research and decide whether to continue.
     
-    This node doesn't modify state significantly - the routing
-    logic uses should_continue() to make the actual decision.
+    This node exists for the graph structure - the actual routing
+    decision is made in should_continue().
     """
-    # This node exists mainly for the graph structure
-    # The actual decision is made in should_continue()
     return {}
 
 
@@ -200,7 +208,7 @@ def should_continue(state: ResearchState) -> Literal["generate_query", "write_re
     if iteration >= max_iterations:
         return "write_report"
     
-    # Ask LLM to evaluate
+    # Get current state
     topic = state["topic"]
     running_summary = state.get("running_summary", "")
     
@@ -208,6 +216,7 @@ def should_continue(state: ResearchState) -> Literal["generate_query", "write_re
     if len(running_summary) < 200:
         return "generate_query"
     
+    # Ask LLM to evaluate
     prompt = REFLECT_PROMPT.format(
         topic=topic,
         running_summary=running_summary,
@@ -234,8 +243,15 @@ def write_report(state: ResearchState) -> dict:
     
     # Format sources for the prompt
     sources_text = ""
-    for i, s in enumerate(sources[:15], 1):  # Limit to 15 sources
-        sources_text += f"[{i}] {s['title']}: {s['url']}\n"
+    unique_urls = []
+    for s in sources:
+        if s["url"] not in unique_urls:
+            unique_urls.append(s["url"])
+    
+    for i, url in enumerate(unique_urls[:15], 1):  # Limit to 15 sources
+        # Find the title for this URL
+        title = next((s["title"] for s in sources if s["url"] == url), "Source")
+        sources_text += f"[{i}] {title}: {url}\n"
     
     prompt = WRITE_REPORT_PROMPT.format(
         topic=topic,
