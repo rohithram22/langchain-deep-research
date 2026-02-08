@@ -118,8 +118,8 @@ def run_single_query(query: str, config: AgentConfig, verbose: bool = False):
 def run_with_streaming(query: str, config: AgentConfig):
     """Run research with verbose output showing each step."""
     
-    # Create the graph
-    graph = create_graph(config)
+    # Create the graph with verbose mode enabled
+    graph = create_graph(config, verbose=True)
     
     # Set up initial state
     initial_state = {
@@ -127,6 +127,7 @@ def run_with_streaming(query: str, config: AgentConfig):
         "topic": "",
         "running_summary": "",
         "sources": [],
+        "search_results": [],
         "current_query": "",
         "iteration": 0,
         "max_iterations": config.max_iterations
@@ -135,31 +136,13 @@ def run_with_streaming(query: str, config: AgentConfig):
     print("Starting research...\n")
     
     try:
-        # Stream through the graph and capture final state
-        final_state = dict(initial_state)
-        
-        for event in graph.stream(initial_state, stream_mode="updates"):
-            if event is None:
-                continue
-                
-            for node_name, node_output in event.items():
-                # Handle None or empty outputs
-                if node_output is None:
-                    node_output = {}
-                
-                print_node_output(node_name, node_output)
-                
-                # Update final_state with node outputs
-                if isinstance(node_output, dict):
-                    for key, value in node_output.items():
-                        if not key.startswith("_"):  # Skip internal keys
-                            final_state[key] = value
+        # Simply invoke the graph - verbose logging happens inside nodes
+        result = graph.invoke(initial_state)
         
         # Extract the report from messages
         report = ""
-        if "messages" in final_state:
-            messages = final_state["messages"]
-            # Handle both list and single message
+        if "messages" in result:
+            messages = result["messages"]
             if isinstance(messages, list):
                 for msg in reversed(messages):
                     if hasattr(msg, "content"):
@@ -174,8 +157,8 @@ def run_with_streaming(query: str, config: AgentConfig):
         print(report if report else "No report generated.")
         print(f"\n{'='*60}")
         
-        sources = final_state.get("sources", [])
-        iterations = final_state.get("iteration", 0)
+        sources = result.get("sources", [])
+        iterations = result.get("iteration", 0)
         print(f"\nStats: {iterations} iterations, {len(sources)} sources gathered")
         
     except Exception as e:
@@ -184,66 +167,161 @@ def run_with_streaming(query: str, config: AgentConfig):
 
 
 def print_node_output(node_name: str, output: dict):
-    """Pretty print the output of each node."""
+    """Pretty print the output of each node with detailed internal information."""
     
     # Handle None output
     if output is None:
         output = {}
     
+    # Get verbose info if available
+    verbose_info = output.get("_verbose", {})
+    
     # Define descriptions for each node
     descriptions = {
-        "initialize": "Initializing Research State",
-        "generate_query": "Generating Search Query",
-        "search": "Searching the Web",
-        "summarize": "Summarizing Results",
-        "reflect": "Reflecting on Progress",
-        "write_report": "Writing Final Report"
+        "initialize": "INITIALIZING RESEARCH STATE",
+        "generate_query": "GENERATING SEARCH QUERY",
+        "search": "EXECUTING WEB SEARCH",
+        "summarize": "SUMMARIZING RESULTS",
+        "reflect": "REFLECTING ON PROGRESS",
+        "write_report": "WRITING FINAL REPORT"
     }
     
-    description = descriptions.get(node_name, "Processing")
+    description = descriptions.get(node_name, "PROCESSING")
     
-    print(f"\n{'-'*50}")
-    print(f"{description}")
-    print(f"{'-'*50}")
+    print(f"\n{'='*60}")
+    print(f"[NODE] {description}")
+    print(f"{'='*60}")
     
     if node_name == "initialize":
-        if "topic" in output:
-            print(f"   Topic: {output['topic']}")
-        print(f"   Initialized research state")
+        # Get topic from verbose_info first, then output, then empty string
+        topic = verbose_info.get("topic_extracted") or output.get("topic") or "(not set)"
+        print(f"\n  Input:")
+        print(f"    - User query from messages")
+        print(f"\n  Output:")
+        print(f"    - Topic: \"{topic}\"")
+        print(f"    - Running summary: (empty)")
+        print(f"    - Sources: []")
+        print(f"    - Iteration: 0")
     
     elif node_name == "generate_query":
-        if "current_query" in output:
-            print(f"   Generated search query: \"{output['current_query']}\"")
+        # Get values with proper fallbacks
+        prompt = verbose_info.get("prompt_sent") or "(prompt not captured)"
+        llm_response = verbose_info.get("llm_response") or "(response not captured)"
+        final_query = verbose_info.get("final_query") or output.get("current_query") or "(no query)"
+        
+        print(f"\n  LLM Call:")
+        print(f"    - Model: Generating search query based on topic and current knowledge")
+        print(f"\n  Prompt Sent to LLM:")
+        print(f"    {_truncate_text(prompt, 300)}")
+        print(f"\n  LLM Response:")
+        print(f"    \"{llm_response}\"")
+        print(f"\n  Output:")
+        print(f"    - Search query: \"{final_query}\"")
     
     elif node_name == "search":
-        if "sources" in output:
-            num_sources = len(output.get("sources", []))
-            print(f"   Found {num_sources} total sources")
-            # Show the latest sources
-            new_sources = output.get("_search_results", [])
-            if new_sources:
-                print(f"   New results from this search:")
-                for s in new_sources[:3]:  # Show first 3
-                    title = s.get("title", "No title")[:50]
-                    print(f"      • {title}...")
+        # Get values with proper fallbacks
+        tool_name = verbose_info.get("tool_name") or "Tavily Search"
+        query = verbose_info.get("query") or output.get("current_query") or "(no query)"
+        max_results = verbose_info.get("max_results") or 5
+        search_depth = verbose_info.get("search_depth") or "advanced"
+        results = verbose_info.get("results") or output.get("_search_results") or []
+        error = verbose_info.get("error")
+        total_sources = verbose_info.get("total_sources") or len(output.get("sources", []))
+        
+        print(f"\n  Tool Call:")
+        print(f"    - Tool: {tool_name}")
+        print(f"    - Query: \"{query}\"")
+        print(f"    - Max Results: {max_results}")
+        print(f"    - Search Depth: {search_depth}")
+        
+        if error:
+            print(f"\n  Error:")
+            print(f"    {error}")
+        else:
+            print(f"\n  Results Found ({len(results)}):")
+            if results:
+                for i, result in enumerate(results[:5], 1):  # Show up to 5
+                    title = result.get("title", "No title")[:60]
+                    url = result.get("url", "")
+                    content_preview = _truncate_text(result.get("content", ""), 100)
+                    print(f"\n    [{i}] {title}")
+                    print(f"        URL: {url}")
+                    print(f"        Content: {content_preview}")
+            else:
+                print(f"    (no results)")
+            
+            print(f"\n  Output:")
+            print(f"    - Total sources collected: {total_sources}")
     
     elif node_name == "summarize":
-        if "running_summary" in output:
-            summary = output["running_summary"]
-            # Show a preview of the summary
-            preview = summary[:200] + "..." if len(summary) > 200 else summary
-            print(f"   Updated summary ({len(summary)} chars)")
-            print(f"   Preview: {preview}")
-        if "iteration" in output:
-            print(f"   Iteration: {output['iteration']}")
+        if verbose_info.get("skipped"):
+            print(f"\n  Skipped: {verbose_info.get('reason') or 'No results'}")
+        else:
+            prompt = verbose_info.get("prompt_sent") or "(prompt not captured)"
+            llm_response = verbose_info.get("llm_response") or output.get("running_summary") or "(no summary)"
+            summary_length = verbose_info.get("summary_length") or len(output.get("running_summary", ""))
+            iteration = verbose_info.get("iteration") or output.get("iteration") or 0
+            
+            print(f"\n  LLM Call:")
+            print(f"    - Model: Updating running summary with new information")
+            print(f"\n  Prompt Sent to LLM:")
+            print(f"    {_truncate_text(prompt, 300)}")
+            print(f"\n  LLM Response (Updated Summary):")
+            print(f"    {_truncate_text(llm_response, 500)}")
+            print(f"\n  Output:")
+            print(f"    - Summary length: {summary_length} characters")
+            print(f"    - Iteration: {iteration}")
     
     elif node_name == "reflect":
-        print(f"   Evaluating if more research is needed...")
+        iteration = verbose_info.get("iteration") or 0
+        max_iterations = verbose_info.get("max_iterations") or 5
+        summary_length = verbose_info.get("summary_length") or 0
+        llm_consulted = verbose_info.get("llm_consulted", False)
+        llm_response = verbose_info.get("llm_response") or ""
+        decision = verbose_info.get("decision") or "(unknown)"
+        reason = verbose_info.get("reason") or "(no reason captured)"
+        
+        print(f"\n  Current State:")
+        print(f"    - Iteration: {iteration}/{max_iterations}")
+        print(f"    - Summary length: {summary_length} characters")
+        
+        if llm_consulted:
+            print(f"\n  LLM Call:")
+            print(f"    - Model: Evaluating if research is sufficient")
+            print(f"\n  LLM Response:")
+            print(f"    \"{llm_response}\"")
+        else:
+            print(f"\n  LLM Call:")
+            print(f"    - Skipped (decision made by rule)")
+        
+        print(f"\n  Decision:")
+        print(f"    - Next node: {decision}")
+        print(f"    - Reason: {reason}")
     
     elif node_name == "write_report":
-        print(f"   Writing final report...")
-        if "messages" in output:
-            print(f"   Report generated successfully!")
+        prompt = verbose_info.get("prompt_sent") or "(prompt not captured)"
+        sources_count = verbose_info.get("sources_count") or 0
+        report_length = verbose_info.get("report_length") or 0
+        
+        print(f"\n  LLM Call:")
+        print(f"    - Model: Generating final research report")
+        print(f"\n  Prompt Sent to LLM:")
+        print(f"    {_truncate_text(prompt, 400)}")
+        print(f"\n  Output:")
+        print(f"    - Sources cited: {sources_count}")
+        print(f"    - Report length: {report_length} characters")
+        print(f"    - Report generated successfully")
+
+
+def _truncate_text(text: str, max_length: int) -> str:
+    """Truncate text and add ellipsis if needed."""
+    if not text:
+        return "(empty)"
+    # Clean up whitespace
+    text = " ".join(text.split())
+    if len(text) <= max_length:
+        return text
+    return text[:max_length] + "..."
 
 
 def run_interactive(config: AgentConfig, verbose: bool = False):

@@ -1,23 +1,3 @@
-"""
-LangGraph definition for the Deep Research Agent.
-
-Graph Structure:
-
-1. Start with a research topic
-2. Generate search queries based on current knowledge
-3. Search the web for relevant sources
-4. Summarize and add findings to running summary
-5. Reflect: Do we have enough info?
-   - If NO (CONTINUE) -> go back to step 2
-   - If YES (SUFFICIENT) -> go to step 6
-6. Write the final research report
-7. Done
-
-The key insight: each iteration builds on the previous summary, so queries become more targeted and we avoid duplicate research.
-
-
-"""
-
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage
 
@@ -35,18 +15,19 @@ from .nodes import (
 )
 
 
-def create_graph(config: AgentConfig = None) -> StateGraph:
+def create_graph(config: AgentConfig = None, verbose: bool = False) -> StateGraph:
     """
     Create and compile the research agent graph.
     
     Args:
         config: Optional configuration for the agent
+        verbose: Whether to print verbose output
         
     Returns:
         Compiled StateGraph ready to invoke
     """
     # Initialize the agent components
-    init_agent(config)
+    init_agent(config, verbose=verbose)
     
     # Create the graph
     graph = StateGraph(ResearchState)
@@ -105,6 +86,7 @@ def run_research(
         "topic": "",
         "running_summary": "",
         "sources": [],
+        "search_results": [],
         "current_query": "",
         "iteration": 0,
         "max_iterations": config.max_iterations if config else 5

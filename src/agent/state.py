@@ -36,6 +36,9 @@ class ResearchState(TypedDict):
     # All sources gathered (for citations)
     sources: list[dict]  # [{title, url, content}, ...]
     
+    # Latest search results (temporary, for summarize node)
+    search_results: list[dict]
+    
     # The most recent search query used
     current_query: str
     
